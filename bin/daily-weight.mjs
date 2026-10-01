@@ -16,6 +16,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { extractArticle, htmlText, pageTitle } from '../scripts/lib/article.mjs';
 
 const ARGS = process.argv.slice(2);
 const opt = (name) => { const i = ARGS.indexOf(name); return i >= 0 ? ARGS[i + 1] : undefined; };
@@ -53,7 +54,7 @@ const loadEdition = async (date) => {
 };
 
 const SECTIONS = { models: 'Models', agents: 'Agents', infra: 'Infra', research: 'Research', safety: 'Safety', industry: 'Industry' };
-const SOURCES = { hn: 'HN', reddit: 'Reddit', labs: 'Labs', arxiv: 'arXiv', github: 'GitHub', press: 'Press' };
+const SOURCES = { hn: 'HN', reddit: 'Reddit', x: 'X', labs: 'Labs', arxiv: 'arXiv', github: 'GitHub', press: 'Press' };
 
 // ---------- drawing primitives ----------
 
@@ -287,37 +288,6 @@ const fetchOk = async (url) => {
 };
 const why = (e) => (e.name === 'TimeoutError' ? 'it took too long to answer' : e.message);
 
-const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', mdash: '—', ndash: '–', hellip: '…',
-  rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', middot: '·', copy: '©' };
-const decode = (s) => s.replace(/&(#x[\da-f]+|#\d+|\w+);/gi, (m, e) => {
-  if (e[0] !== '#') return NAMED[e.toLowerCase()] ?? m;
-  try { return String.fromCodePoint(/^#x/i.test(e) ? parseInt(e.slice(2), 16) : Number(e.slice(1))); } catch { return m; }
-});
-// HTML fragment to plain text with paragraph breaks kept.
-const htmlText = (html = '') => decode(html
-  .replace(/<\s*(br)\s*\/?>/gi, '\n').replace(/<\/?\s*p\b[^>]*>/gi, '\n\n').replace(/<[^>]+>/g, ''))
-  .replace(/[ \t]+/g, ' ').replace(/\n[ \t]+/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-
-// Readable text from an article page: the <article> (or <main>) without navigation, scripts and
-// page furniture, as headings, paragraphs, list items, quotes and code. Deliberately simple.
-function extractArticle(html) {
-  const h = html.replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(script|style|noscript|svg|nav|header|footer|aside|form|iframe|button|select|template)\b[\s\S]*?<\/\1\s*>/gi, '');
-  const scope = h.match(/<article\b[^>]*>([\s\S]*)<\/article>/i)?.[1] ?? h.match(/<main\b[^>]*>([\s\S]*)<\/main>/i)?.[1]
-    ?? h.match(/<body\b[^>]*>([\s\S]*)<\/body>/i)?.[1] ?? h;
-  const blocks = [];
-  for (const m of scope.matchAll(/<(h[1-4]|p|li|pre|blockquote)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi)) {
-    const tag = m[1].toLowerCase();
-    const text = tag === 'pre'
-      ? decode(m[2].replace(/<[^>]+>/g, '')).replace(/\s+$/, '')
-      : decode(m[2].replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
-    if (!text || (tag === 'p' && text.length < 30 && !/[.!?:]$/.test(text))) continue;
-    if (blocks.at(-1)?.text === text) continue;
-    blocks.push({ tag, text });
-    if (blocks.length >= 400) break;
-  }
-  return blocks;
-}
 
 function loadArticle(s) {
   if (!s || articles.has(s.url)) return;
@@ -329,7 +299,7 @@ function loadArticle(s) {
     const html = await res.text();
     const blocks = extractArticle(html);
     if (!blocks.length) throw new Error('no readable text was found on the page');
-    articles.set(s.url, { status: 'ok', blocks, title: decode(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? '').trim() });
+    articles.set(s.url, { status: 'ok', blocks, title: pageTitle(html) });
   }).catch((e) => articles.set(s.url, { status: 'error', error: why(e) })));
 }
 

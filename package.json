@@ -11,11 +11,25 @@
     "build": "astro build",
     "preview": "astro preview",
     "fetch": "node scripts/fetch.mjs",
-    "edition": "node scripts/fetch.mjs && claude -p \"Follow the instructions in scripts/editor-prompt.md\" --allowedTools \"Read,Write,Edit,Glob,Grep,WebFetch,WebSearch,Bash(node scripts/images.mjs:*),Bash(node scripts/drop.mjs:*),Bash(npm run build)\"",
+    "rank": "node scripts/rank.mjs",
+    "write": "node scripts/write.mjs",
+    "cards": "node scripts/cards.mjs",
+    "check": "node scripts/check.mjs",
+    "edition": "node scripts/fetch.mjs && node scripts/rank.mjs && node scripts/write.mjs && node scripts/cards.mjs && node scripts/check.mjs",
+    "newsletter": "node scripts/newsletter.mjs",
+    "post": "node scripts/post-x.mjs",
+    "test": "node --test \"scripts/*.test.mjs\"",
     "tui": "node bin/daily-weight.mjs",
     "check:tui": "node scripts/check-tui.mjs"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
-    "astro": "^7.3.5"
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@resvg/resvg-js": "^2.6.2",
+    "astro": "^7.3.5",
+    "satori": "^0.33.5",
+    "twitter-api-v2": "^1.29.1"
   }
 }

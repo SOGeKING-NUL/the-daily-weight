@@ -1,4 +1,5 @@
 ---
+import { existsSync } from 'node:fs';
 import { render } from 'astro:content';
 import Edition from '../../../layouts/Edition.astro';
 import { SECTIONS, getEditions, href, longDate, slug, type Edition as E, type Story } from '../../../editions';
@@ -14,10 +15,13 @@ const { Content } = await render(story);
 const more = edition.stories.filter((s) => s !== story);
 const i = edition.stories.indexOf(story);
 const [prev, next] = [edition.stories[i - 1], edition.stories[i + 1]];
-const minutes = Math.max(1, Math.round((story.body ?? '').split(/s+/).length / 220));
+const minutes = Math.max(1, Math.round((story.body ?? '').split(/\s+/).length / 220));
 const grade = d.must_read ? 'Must read' : d.recommended ? 'Recommended' : null;
+// Link preview: the story's share card if scripts/cards.mjs drew one, else its photo.
+const cardFile = `cards/${edition.date}/${slug(story)}.png`;
+const image = existsSync(`public/${cardFile}`) ? `/${cardFile}` : d.image;
 ---
-<Edition title={`${d.title} — The Daily Weight`} edition={edition}>
+<Edition title={`${d.title} — The Daily Weight`} edition={edition} description={d.why_read} image={image}>
   <div class="article-page">
     <article class="article">
       <nav class="crumbs" aria-label="Breadcrumb">

@@ -10,7 +10,7 @@ const stories = defineCollection({
     authors: z.array(z.string()).min(1),
     url: z.string().url(),
     discuss_url: z.string().url().nullable(),
-    source: z.enum(['hn', 'reddit', 'labs', 'arxiv', 'github', 'press']),
+    source: z.enum(['hn', 'reddit', 'x', 'labs', 'arxiv', 'github', 'press']),
     section: z.enum(['models', 'agents', 'infra', 'research', 'safety', 'industry']),
     interest_score: z.number().int().min(1).max(10),
     recommended: z.boolean(),

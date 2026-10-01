@@ -3,14 +3,20 @@ import '../styles/main.css';
 import Masthead from '../components/Masthead.astro';
 import FilterBar from '../components/FilterBar.astro';
 import StoryBlock from '../components/StoryBlock.astro';
+import { existsSync } from 'node:fs';
 import { filterAttrs, frontPage, getEditions, href, longDate, plural, type Edition } from '../editions';
 
 // With `front`, renders the edition's front page; otherwise the page body comes from the slot.
-interface Props { title: string; edition: Edition; front?: boolean }
-const { title, edition, front = false } = Astro.props;
+// `description` and `image` feed the link preview (X, Slack, iMessage); the share cards that
+// scripts/cards.mjs draws into public/cards are used when they exist, the edition's own otherwise.
+interface Props { title: string; edition: Edition; front?: boolean; description?: string; image?: string | null }
+const { title, edition, front = false, description = 'A daily AI newspaper for people who build or follow models, agents, infra, research and safety.', image } = Astro.props;
 const { lead, seconds, sections } = frontPage(edition);
 const RAIL = 12; // the headline rail lists the top stories; more makes the top block taller than the lead
 const otherEditions = (await getEditions()).filter((e) => e.date !== edition.date).slice(0, 6);
+const card = image ?? (existsSync(`public/cards/${edition.date}.png`) ? `/cards/${edition.date}.png` : null);
+const page = new URL(Astro.url.pathname, Astro.site);
+const analytics = import.meta.env.PUBLIC_CF_ANALYTICS_TOKEN; // Cloudflare Web Analytics: free, no cookies
 ---
 <!doctype html>
 <html lang="en">
@@ -18,7 +24,16 @@ const otherEditions = (await getEditions()).filter((e) => e.date !== edition.dat
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
-    <meta name="description" content="A daily AI newspaper for people who build or follow models, agents, infra, research and safety." />
+    <meta name="description" content={description} />
+    <link rel="canonical" href={page} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="The Daily Weight" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={page} />
+    {card && <meta property="og:image" content={new URL(card, Astro.site)} />}
+    <meta name="twitter:card" content={card ? 'summary_large_image' : 'summary'} />
     <script is:inline>try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -90,7 +105,18 @@ const otherEditions = (await getEditions()).filter((e) => e.date !== edition.dat
         <!-- Show the address the reader is actually on; the build only knows the configured site. -->
         <script is:inline>document.querySelector('[data-cli]').textContent = 'curl -s ' + location.origin + '/txt';</script>
         <p>One edition a day on models, agents, infra, research and safety. The paper ends when you reach the bottom.</p>
+        <form class="subscribe" action="/api/subscribe" method="post">
+          <label for="subscribe-email">The paper in your inbox every morning</label>
+          <!-- A field people never see; bots fill it and are shown out quietly. -->
+          <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" hidden />
+          <span>
+            <input id="subscribe-email" type="email" name="email" required placeholder="you@example.com" autocomplete="email" />
+            <button type="submit">Subscribe</button>
+          </span>
+          <small>One email a day. Unsubscribe with one click.</small>
+        </form>
       </footer>
     </div>
+    {analytics && <script is:inline defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon={`{"token": "${analytics}"}`}></script>}
   </body>
 </html>

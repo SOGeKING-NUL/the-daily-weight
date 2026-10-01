@@ -1,12 +1,12 @@
 // Finds a freely licensed landscape photo on Wikimedia Commons for one story, saves it to
-// public/images/<slug>.jpg and writes image / image_credit / image_source into the front matter.
+// public/images/<date>-<slug>.jpg and writes image / image_credit / image_source into the front matter.
 //
 //   node scripts/images.mjs content/editions/2026-10-01/some-story.md "server racks data center"
 //
 // Pick generic subjects. Skip anything showing real people or brand logos.
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { basename } from 'node:path';
+import { basename, dirname } from 'node:path';
 
 const [file, query] = process.argv.slice(2);
 if (!file || !query) {
@@ -45,7 +45,8 @@ if (!pick) {
   process.exitCode = 2; // not process.exit(): it aborts open sockets and crashes Node on Windows
 } else {
   const i = pick.imageinfo[0];
-  const slug = basename(file, '.md');
+  // Dated, so two editions with the same slug never share (or delete) each other's photo.
+  const slug = `${basename(dirname(file))}-${basename(file, '.md')}`;
   mkdirSync('public/images', { recursive: true });
   writeFileSync(`public/images/${slug}.jpg`, Buffer.from(await (await get(i.thumburl)).arrayBuffer()));
 

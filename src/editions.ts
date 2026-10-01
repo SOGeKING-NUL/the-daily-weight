@@ -4,15 +4,16 @@ export type Story = CollectionEntry<'stories'>;
 export type Edition = { date: string; stories: Story[] };
 
 export const SOURCES = {
-  hn: 'HN', reddit: 'Reddit', labs: 'Labs', arxiv: 'arXiv', github: 'GitHub', press: 'Press',
+  hn: 'HN', reddit: 'Reddit', x: 'X', labs: 'Labs', arxiv: 'arXiv', github: 'GitHub', press: 'Press',
 } as const;
 
-// Every source filter a story answers to: its primary type, plus HN or Reddit when that's
+// Every source filter a story answers to: its primary type, plus HN, Reddit or X when that's
 // where it's being discussed. A lab post with a big HN thread shows under both Labs and HN.
 export const sourcesOf = ({ data: d }: Story) => {
   const tags = new Set<string>([d.source]);
   if (d.discuss_url?.includes('news.ycombinator.com')) tags.add('hn');
   if (d.discuss_url?.includes('reddit.com')) tags.add('reddit');
+  if (/\/\/(x|twitter)\.com\//.test(d.discuss_url ?? '')) tags.add('x');
   return [...tags];
 };
 
