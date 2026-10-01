@@ -1,6 +1,8 @@
 # The daily run. 06:00 IST: gather, rank, write, check, build, commit, deploy, email, post the
 # morning thread. 19:45 IST (10:15 ET, when AI Twitter is at its desk): the evening posts.
-# Repo variable PUBLISH=off stops everything leaving the runner; dry_run does the same for one run.
+# The repo variable PUBLISH decides what the schedule does: unset, nothing (a fresh repo is safe);
+# "dry", the whole build with nothing leaving the runner; "on", the lot. A manual run always builds
+# and publishes only when PUBLISH is "on" and dry_run is off.
 name: Edition
 
 on:
@@ -25,11 +27,11 @@ permissions:
 env:
   SITE_URL: ${{ vars.SITE_URL }}
   PUBLIC_CF_ANALYTICS_TOKEN: ${{ vars.PUBLIC_CF_ANALYTICS_TOKEN }}
-  PUBLISH: ${{ (vars.PUBLISH != 'off' && !inputs.dry_run) && 'on' || 'off' }}
+  PUBLISH: ${{ (vars.PUBLISH == 'on' && !inputs.dry_run) && 'on' || 'off' }}
 
 jobs:
   edition:
-    if: github.event.schedule != '15 14 * * *'
+    if: github.event.schedule != '15 14 * * *' && (github.event_name == 'workflow_dispatch' || vars.PUBLISH == 'on' || vars.PUBLISH == 'dry')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -102,7 +104,7 @@ jobs:
           [ -n "$f" ] && gh issue create --title "Undecided must-cover stories: $(basename "$f" .gaps.md)" --body-file "$f" || echo 'no gaps'
 
   evening:
-    if: github.event.schedule == '15 14 * * *'
+    if: github.event.schedule == '15 14 * * *' && vars.PUBLISH == 'on'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:

@@ -4,3 +4,4 @@ dist/
 drafts/
 public/cards/
 .env
+vars.env

@@ -79,9 +79,11 @@ Every decision is recorded in `drafts/<date>.decisions.json`. To rebuild a past 
 
 `.github/workflows/edition.yml` does all of the above at 06:00 IST, then commits the edition, deploys to Cloudflare Pages, sends the email and posts the morning thread. At 19:45 IST (10:15 ET, when AI Twitter is at its desk) it posts the top three stories again as singles. `workflow_dispatch` runs it by hand, with a `date` and a `dry_run` that builds everything and publishes nothing. GitHub emails you when a run fails.
 
-**Kill switch:** set the repository variable `PUBLISH` to `off` and nothing leaves the runner. **Fixing a published story:** edit its `.md` and push; the next run redeploys. To take down an X post: `node scripts/post-x.mjs --delete <id>`.
+**The switch:** the repository variable `PUBLISH`. Unset, the schedule does nothing (a fresh fork is safe). `dry` builds the whole edition and publishes none of it, for testing. `on` is the real thing. Set it to `dry` or delete it to stop everything at once. **Fixing a published story:** edit its `.md` and push; the next run redeploys. To take down an X post: `node scripts/post-x.mjs --delete <id>`.
 
 ### Set it up
+
+Copy `.env.example` to `.env` (gitignored) and fill it in as you create each account. With the [GitHub CLI](https://cli.github.com) logged in, `gh secret set -f .env` and `gh variable set -f vars.env` load them into Actions without the values passing through anything else; the same `.env` makes the scripts work locally.
 
 Secrets (Settings → Secrets and variables → Actions):
 
