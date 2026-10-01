@@ -16,6 +16,8 @@ import { execSync } from 'node:child_process';
 import { decode } from './lib/article.mjs';
 import { clean, fromPosts, merge } from './lib/candidates.mjs';
 
+try { process.loadEnvFile(); } catch {} // .env, when there is one
+
 // Editions are dated in India time and published around 06:30 IST (01:00 UTC).
 const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 const date = process.argv[2] ?? today;

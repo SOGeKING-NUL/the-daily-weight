@@ -12,6 +12,8 @@ import { Resvg } from '@resvg/resvg-js';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { readStory } from './lib/story.mjs';
 
+try { process.loadEnvFile(); } catch {} // .env, when there is one
+
 export const TOP = 8; // story cards for the stories the X account can post; the rest use their photo
 const INK = '#1a1a1a', PAPER = '#fbfaf6', MUTED = '#5b564d', RULE = '#dcd6cb', ACCENT = '#b0071e';
 const SECTIONS = { models: 'Models', agents: 'Agents', infra: 'Infra', research: 'Research', safety: 'Safety', industry: 'Industry' };

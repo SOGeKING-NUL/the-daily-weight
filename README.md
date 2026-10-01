@@ -55,7 +55,7 @@ A story counts as read after it has been on screen for a moment or when you open
 ## How an edition is made
 
 ```sh
-npm run edition    # fetch → rank → write → cards → check, about ten minutes and roughly $0.75 of Claude
+npm run edition    # fetch → rank → write → cards → check, about ten minutes and roughly $0.75 in model calls
 ```
 
 1. **Gather** (`scripts/fetch.mjs`, no keys needed except for X). Candidates from the last 36 hours land in `drafts/<date>.json`:
@@ -69,7 +69,7 @@ npm run edition    # fetch → rank → write → cards → check, about ten min
 
    A link found in several places is merged into one candidate with `seen_on` listing where. One failing source goes into `errors[]` and the rest carry on.
 2. **Rank** (`scripts/rank.mjs`, no LLM). Candidates about one event are clustered (same link, same repo, near-identical headlines, a post and what it quotes), scored for heat (HN points, X engagement, how many places it appeared, digest mentions, lab posts), and the ones the paper *must decide on* are flagged: every post from OpenAI, DeepMind, Anthropic or Qwen; 300+ points on HN; the top ten on AI Twitter; anything two digests both link; anything seen on three sources. The rules are in `scripts/lib/candidates.mjs` and `npm test` checks them. Output: `drafts/<date>.ranked.json`.
-3. **Write** (`scripts/write.mjs`, needs `ANTHROPIC_API_KEY`). One Claude call picks 20 to 30 stories from the top 60 clusters; every must-cover cluster is either picked or rejected with a reason. Then one call per story, given the source text we fetched ourselves, returns the front matter and two or three paragraphs. A fact check compares every number and proper name in the story against the source text; a story that fails gets one rewrite, then is dropped. `scripts/images.mjs` adds a Wikimedia Commons photo. The editorial rules are `scripts/editor-prompt.md`. `--limit 3` writes only the top three picks, a cheap trial.
+3. **Write** (`scripts/write.mjs`, needs `LLM_API_KEY`). The model is Claude Sonnet 5.5 through OpenRouter by default; `LLM_BASE_URL` and `LLM_MODEL` point it at any OpenAI-compatible provider. One call picks 20 to 30 stories from the top 60 clusters; every must-cover cluster is either picked or rejected with a reason. Then one call per story, given the source text we fetched ourselves (sites that block bots, like openai.com, are read through [Jina's reader](https://jina.ai/reader)), returns the front matter and two or three paragraphs. A fact check compares every number and proper name in the story against the source text; a story that fails gets one rewrite, then is dropped. `scripts/images.mjs` adds a Wikimedia Commons photo. The editorial rules are `scripts/editor-prompt.md`. `--limit 3` writes only the top three picks, a cheap trial.
 4. **Cards** (`scripts/cards.mjs`). Share cards in the paper's look, 1200×630, for the edition and its top eight stories: link previews on X and elsewhere, and the images in the X thread.
 5. **Check** (`scripts/check.mjs`). Drops any story whose source no longer answers, runs `npm run build` (which validates the front matter), and confirms every must-cover cluster was decided on. Undecided ones get one more writing pass in the workflow, then the edition goes out anyway and the leftovers are filed as a GitHub issue.
 
@@ -89,13 +89,14 @@ Secrets (Settings → Secrets and variables → Actions):
 
 | Secret | From |
 |---|---|
-| `ANTHROPIC_API_KEY` | [platform.claude.com](https://platform.claude.com). An API key under the commercial terms, not a Claude Pro/Max login, which the consumer terms don't allow for automation. |
+| `LLM_API_KEY` | An [OpenRouter](https://openrouter.ai/keys) key (the default), or any OpenAI-compatible provider with `LLM_BASE_URL` and `LLM_MODEL` set, e.g. an [Anthropic](https://platform.claude.com) API key with `https://api.anthropic.com/v1` and `claude-sonnet-5`. A Claude Pro/Max login is not an API key. |
+| `JINA_API_KEY` | Optional. [Jina](https://jina.ai) reader key, only to raise the rate limit for reading bot-blocking sites. |
 | `TWITTERAPI_KEY` | [twitterapi.io](https://twitterapi.io). Pay as you go. |
 | `RESEND_API_KEY`, `RESEND_SEGMENT_ID` | [resend.com](https://resend.com): verify your domain, create a segment for subscribers. Free up to 1,000 contacts. |
 | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Cloudflare → create a Pages project and an API token with Pages edit rights. |
 | `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_SECRET` | [developer.x.com](https://developer.x.com): an app with read and write on the bot account, pay-per-use credits (about $0.015 a post, $0.20 for one with a link; the thread puts its one link last). |
 
-Variables: `SITE_URL` (`https://your.domain`), `X_LIST_ID`, `CF_PAGES_PROJECT`, `MAIL_FROM` (`The Daily Weight <paper@your.domain>`), `PUBLIC_CF_ANALYTICS_TOKEN` (Cloudflare Web Analytics, optional), `PUBLISH` (`on`).
+Variables: `SITE_URL` (`https://your.domain`), `LLM_BASE_URL` and `LLM_MODEL` (optional, see above), `X_LIST_ID`, `CF_PAGES_PROJECT`, `MAIL_FROM` (`The Daily Weight <paper@your.domain>`), `PUBLIC_CF_ANALYTICS_TOKEN` (Cloudflare Web Analytics, optional), `PUBLISH` (`on`).
 
 Cloudflare Pages environment variables (for the signup functions): `RESEND_API_KEY`, `RESEND_SEGMENT_ID`, `MAIL_FROM`, `SUBSCRIBE_SECRET` (any long random string).
 
@@ -109,7 +110,7 @@ The footer form posts to `functions/api/subscribe.ts`, which emails a confirmati
 
 ### Costs
 
-At under a hundred subscribers: Claude about $15–25 a month, twitterapi.io $10–18, X posting $8–12, everything else (Resend, Cloudflare Pages and Functions, GitHub Actions on a public repo) free. Roughly $35–55 a month plus the domain.
+At under a hundred subscribers: the model about $15–25 a month (OpenRouter adds about 5% on top of Anthropic's prices), twitterapi.io $10–18, X posting $8–12, everything else (Resend, Cloudflare Pages and Functions, GitHub Actions on a public repo) free. Roughly $35–55 a month plus the domain.
 
 ## Add a story by hand
 

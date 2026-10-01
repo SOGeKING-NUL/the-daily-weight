@@ -1,21 +1,30 @@
-// Writes one edition from its ranked clusters (drafts/<date>.ranked.json) with the Claude API:
-// one call picks the stories, then one call per story writes it from source text we fetch ourselves.
-// Every decision lands in drafts/<date>.decisions.json, which scripts/check.mjs holds to account.
-// Needs ANTHROPIC_API_KEY (an API key from platform.claude.com, not a Claude subscription login).
+// Writes one edition from its ranked clusters (drafts/<date>.ranked.json): one model call picks the
+// stories, then one call per story writes it from source text we fetch ourselves. Every decision
+// lands in drafts/<date>.decisions.json, which scripts/check.mjs holds to account.
+//
+// The model is reached through any OpenAI-compatible endpoint. Default: Claude Sonnet 5.5 through
+// OpenRouter (LLM_API_KEY). LLM_BASE_URL and LLM_MODEL switch provider or model, for example
+// LLM_BASE_URL=https://api.anthropic.com/v1 LLM_MODEL=claude-sonnet-5 with an Anthropic key.
 //
 //   node scripts/write.mjs                       newest ranked drafts
 //   node scripts/write.mjs 2026-10-01
 //   node scripts/write.mjs 2026-10-01 --limit 3  only the top three picks: a cheap trial run
 //   node scripts/write.mjs --gaps                only the must-cover clusters no earlier run decided on
 
-import Anthropic from '@anthropic-ai/sdk';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { extractArticle } from './lib/article.mjs';
 import { slugify, storyFile, unsupported } from './lib/story.mjs';
 
-const MODEL = 'claude-sonnet-5'; // ponytail: the plan's cost pick; claude-opus-5 judges better at ~2.5x the price
+try { process.loadEnvFile(); } catch {} // .env, when there is one
+const LLM = {
+  url: `${(process.env.LLM_BASE_URL ?? 'https://openrouter.ai/api/v1').replace(/\/$/, '')}/chat/completions`,
+  key: process.env.LLM_API_KEY ?? process.env.OPENROUTER_API_KEY,
+  model: process.env.LLM_MODEL ?? 'anthropic/claude-sonnet-5.5', // ponytail: $2/$10 per MTok; claude-opus-5.5 judges better at 2x
+};
+if (!LLM.key) throw new Error('set LLM_API_KEY (an OpenRouter key, or another OpenAI-compatible provider via LLM_BASE_URL)');
+
 const SECTIONS = ['models', 'agents', 'infra', 'research', 'safety', 'industry'];
 const SOURCES = ['labs', 'press', 'hn', 'reddit', 'x', 'arxiv', 'github'];
 const MAX_SOURCE = 15000; // characters of source text per story (~4k tokens)
@@ -27,26 +36,33 @@ const date = args.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a))
   ?? readdirSync('drafts').filter((f) => f.endsWith('.ranked.json')).sort().at(-1)?.slice(0, 10);
 const { clusters } = JSON.parse(readFileSync(`drafts/${date}.ranked.json`, 'utf8'));
 const byId = new Map(clusters.map((c) => [c.id, c]));
+const system = readFileSync('scripts/editor-prompt.md', 'utf8');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const client = new Anthropic({ maxRetries: 5 }); // the SDK retries 429, 529 and 5xx with backoff
-// Stable across every call so the prompt cache can serve it (a no-op below the model's minimum size).
-const system = [{ type: 'text', text: readFileSync('scripts/editor-prompt.md', 'utf8'), cache_control: { type: 'ephemeral' } }];
-
-// One structured-output request. Server tools (web fetch) may pause a long turn; continue it.
-async function ask(content, schema, { effort = 'high', tools } = {}) {
-  const messages = [{ role: 'user', content }];
-  for (let turn = 0; turn < 4; turn++) {
-    const res = await client.messages.create({ model: MODEL, max_tokens: 16000, system, messages, tools,
-      output_config: { effort, format: { type: 'json_schema', schema } } });
-    if (res.stop_reason === 'pause_turn') { messages.push({ role: 'assistant', content: res.content }); continue; }
-    if (res.stop_reason === 'refusal') throw new Error(`declined (${res.stop_details?.category ?? 'no category'})`);
-    if (res.stop_reason === 'max_tokens') throw new Error('ran out of output tokens');
-    const text = res.content.filter((b) => b.type === 'text').at(-1)?.text;
-    // Fetched pages travel with the answer so the fact check can read what the model read.
-    const fetched = res.content.filter((b) => b.type === 'web_fetch_tool_result').map((b) => JSON.stringify(b.content)).join('\n');
-    return { ...JSON.parse(text), fetched };
+// One structured answer from the model. Rate limits, 5xx and network failures get three more tries.
+async function ask(content, schema) {
+  const body = JSON.stringify({
+    model: LLM.model, max_tokens: 8000,
+    messages: [{ role: 'system', content: system }, { role: 'user', content }],
+    response_format: { type: 'json_schema', json_schema: { name: 'answer', strict: true, schema } },
+  });
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const res = await fetch(LLM.url, { method: 'POST', body, signal: AbortSignal.timeout(180000),
+        headers: { Authorization: `Bearer ${LLM.key}`, 'Content-Type': 'application/json', 'X-Title': 'The Daily Weight' } });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 429 || res.status >= 500) throw Object.assign(new Error(`${res.status} ${data.error?.message ?? ''}`), { retry: true });
+      if (!res.ok || data.error) throw new Error(`${res.status} ${data.error?.message ?? JSON.stringify(data).slice(0, 300)}`);
+      const choice = data.choices?.[0];
+      if (choice?.finish_reason === 'length') throw new Error('ran out of output tokens');
+      const text = typeof choice?.message?.content === 'string' ? choice.message.content
+        : (choice?.message?.content ?? []).map((p) => p.text ?? '').join('');
+      return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim());
+    } catch (e) {
+      if (!(e.retry || e.name === 'TimeoutError' || e.message === 'fetch failed') || attempt === 4) throw e;
+      await sleep(attempt * 8000);
+    }
   }
-  throw new Error('no answer after four turns');
 }
 
 const str = { type: 'string' };
@@ -67,7 +83,7 @@ const brief = (c) => ({
   id: c.id, must_cover: c.must_cover ? c.reasons : undefined, heat: c.heat, title: c.title, url: c.url, source: c.source,
   signals: c.signals, discuss_url: c.discuss_url,
   members: c.members.map((m) => ({ title: m.title, url: m.url, source: m.source, from: m.lab ?? m.outlet ?? m.subreddit ?? m.site,
-    blurb: m.blurb?.slice(0, 300), authors: m.authors, note: m.note, kind: m.kind, points: m.points })),
+    blurb: m.blurb?.slice(0, 300), authors: m.authors, note: m.note, kind: m.kind, points: m.points, text: m.text })),
   top_posts: c.top_posts,
 });
 
@@ -110,21 +126,34 @@ console.log(`${picks.length} picked, ${rejections.length} must-cover rejected`);
 // ---------- 2. write ----------
 
 // Readable text of a page: GitHub repos by their README, everything else through extractArticle().
+// Sites that turn bots away (openai.com answers 403) are read through Jina's reader, which renders
+// the page in a browser: free without a key, JINA_API_KEY raises its rate limit.
 async function readPage(url) {
   const repo = url.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/?$/)?.[1];
-  const res = await fetch(repo ? `https://raw.githubusercontent.com/${repo}/HEAD/README.md` : url,
-    { headers: UA, signal: AbortSignal.timeout(20000) });
+  if (repo) {
+    const res = await fetch(`https://raw.githubusercontent.com/${repo}/HEAD/README.md`, { headers: UA, signal: AbortSignal.timeout(20000) });
+    if (res.ok) return (await res.text()).slice(0, MAX_SOURCE);
+  }
+  try {
+    const res = await fetch(url, { headers: UA, signal: AbortSignal.timeout(20000) });
+    if (res.ok && (res.headers.get('content-type') ?? '').includes('html')) {
+      const text = extractArticle(await res.text()).map((b) => b.text).join('\n\n');
+      if (text.length > 400) return text.slice(0, MAX_SOURCE);
+    }
+  } catch {}
+  const jina = process.env.JINA_API_KEY ? { Authorization: `Bearer ${process.env.JINA_API_KEY}` } : {};
+  const res = await fetch(`https://r.jina.ai/${url}`, { signal: AbortSignal.timeout(45000),
+    headers: { Accept: 'text/plain', 'X-Return-Format': 'text', ...jina } });
   if (!res.ok) throw new Error(`${res.status}`);
-  const body = await res.text();
-  if (repo) return body.slice(0, MAX_SOURCE);
-  if (!(res.headers.get('content-type') ?? '').includes('html')) throw new Error('not a web page');
-  return extractArticle(body).map((b) => b.text).join('\n\n').slice(0, MAX_SOURCE);
+  return (await res.text()).slice(0, MAX_SOURCE);
 }
 
 // The primary if we can read it, else the next member that has real text. X posts are their own text.
 async function source(c) {
+  const tried = new Set();
   for (const m of [c, ...c.members]) {
-    if (/\/\/x\.com\//.test(m.url)) continue;
+    if (tried.has(m.url) || /\/\/x\.com\//.test(m.url)) continue;
+    tried.add(m.url);
     try {
       const text = await readPage(m.url);
       if (text.length > 400) return { url: m.url, text };
@@ -143,22 +172,21 @@ async function write(p) {
   const src = await source(c);
   const job = (fix = '') => ask(`Job: write one story for the edition dated ${date}.
 
-${src ? `Source text, from ${src.url}:\n<<<\n${src.text}\n>>>` : `We could not read ${c.url} ourselves. Use the web_fetch tool on it (or on the other member URLs) and write from what it returns; if nothing loads, set keep to false.`}
+${src ? `Source text, from ${src.url}:\n<<<\n${src.text}\n>>>` : `We could not read ${c.url} or any other page about it. Unless the cluster below carries enough verified detail (an X post's own text counts for what its author said), set keep to false.`}
 
 Cluster: ${JSON.stringify(brief(c))}
 Placement: section ${p.section}, interest ${p.interest_score}${p.must_read ? ', must read' : ''}.
 
-Return: title (a plain, specific headline in sentence case), authors (the byline as published: people, or the organisation), source (labs: a lab or company's own post; press: a news report; hn, reddit or x: a community find; arxiv: a paper; github: a repo or release), why_read (one or two sentences on why a builder should spend the time), summary (one line for RSS), body (two or three short Markdown paragraphs: what it is, how it works, what it changes), slug (3 to 6 words, kebab-case), image_subjects (two generic photo subjects for a stock photo: objects or places, never people or logos, e.g. "server racks", "chess pieces"). If the source doesn't support a story, set keep to false and say why in reason, leaving the other fields empty.${fix}`,
-  STORY, { effort: 'medium', tools: src ? undefined : [{ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3 }] });
+Return: title (a plain, specific headline in sentence case), authors (the byline as published: people, or the organisation), source (labs: a lab or company's own post; press: a news report; hn, reddit or x: a community find; arxiv: a paper; github: a repo or release), why_read (one or two sentences on why a builder should spend the time), summary (one line for RSS), body (two or three short Markdown paragraphs: what it is, how it works, what it changes), slug (3 to 6 words, kebab-case), image_subjects (two generic photo subjects for a stock photo: objects or places, never people or logos, e.g. "server racks", "chess pieces"). If the source doesn't support a story, set keep to false and say why in reason, leaving the other fields empty.${fix}`, STORY);
 
-  // The fact check reads everything the writer was given: source text, fetched pages, cluster titles and blurbs.
-  const known = (s) => [src?.text, s.fetched, JSON.stringify(brief(c))].join('\n');
+  // The fact check reads everything the writer was given: the source text and the cluster's titles, blurbs and posts.
+  const known = [src?.text, JSON.stringify(brief(c))].join('\n');
   const claims = (s) => `${s.title}\n${s.why_read}\n${s.summary}\n${s.body}`;
   let story = await job();
-  let bad = story.keep ? unsupported(claims(story), known(story)) : [];
+  let bad = story.keep ? unsupported(claims(story), known) : [];
   if (bad.length) {
     story = await job(`\n\nA first draft used numbers or names the source text doesn't contain: ${bad.join(', ')}. Use only what the source says.\nThat draft: ${JSON.stringify(story)}`);
-    bad = story.keep ? unsupported(claims(story), known(story)) : [];
+    bad = story.keep ? unsupported(claims(story), known) : [];
   }
   if (!story.keep) return { id: p.id, reason: story.reason || 'source does not support a story' };
   if (bad.length) return { id: p.id, reason: `failed the fact check: ${bad.join(', ')}` };

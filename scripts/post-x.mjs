@@ -15,6 +15,8 @@ import { TwitterApi } from 'twitter-api-v2';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { editionStories } from './cards.mjs';
 
+try { process.loadEnvFile(); } catch {} // .env, when there is one
+
 const MORNING = 5; // stories in the thread (cards exist for the top 8)
 const EVENING = 3;
 const SITE = (process.env.SITE_URL ?? 'https://thedailyweight.example').replace(/\/$/, '');

@@ -9,6 +9,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { readStory } from './lib/story.mjs';
 
+try { process.loadEnvFile(); } catch {} // .env, when there is one
+
 const args = process.argv.slice(2);
 const date = args.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a)) ?? readdirSync('content/editions').sort().at(-1);
 const to = args.includes('--to') ? args[args.indexOf('--to') + 1] : null;

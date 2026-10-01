@@ -26,7 +26,6 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.131.0",
     "@resvg/resvg-js": "^2.6.2",
     "astro": "^7.3.5",
     "satori": "^0.33.5",
